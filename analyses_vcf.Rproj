@@ -1,13 +1,626 @@
-Version: 1.0
+# Analyses vcf
 
-RestoreWorkspace: Default
-SaveWorkspace: Default
-AlwaysSaveHistory: Default
+# definition des repertoires de travail
+maindir <- "/Users/Carole/Desktop/analyses_vcf" # / puis tab ou tild/Desktop
+datadir <- file.path(maindir, "data")
+resultdir <- file.path(maindir, "results")
 
-EnableCodeIndexing: Yes
-UseSpacesForTab: Yes
-NumSpacesForTab: 2
-Encoding: UTF-8
+library("dplyr", lib.loc="/Library/Frameworks/R.framework/Versions/3.5/Resources/library")
+library("tidyverse", lib.loc="/Library/Frameworks/R.framework/Versions/3.5/Resources/library")
 
-RnwWeave: Sweave
-LaTeX: pdfLaTeX
+
+library("vcfR", lib.loc="/Library/Frameworks/R.framework/Versions/3.5/Resources/library")
+
+vcf_file <- system.file("/Users/Carole/Desktop/analyses_vcf/data/Plvit019.vcf", package = "pinfsc50")
+
+# ajout de ##fileformat=VCFv  et tout le header au d??but du vcf.
+# Error in x@fix[, "CHROM"] : no 'dimnames' attribute for array : corrig?? en rajoutant le # devant la ligne de CHROM
+
+Plvit019_Full_vcf <- read.vcfR("/Users/Carole/Desktop/analyses_vcf/data/Plvit019.vcf", limit = 1e+07, nrows = -1, skip = 0, cols = NULL,
+          convertNA = TRUE, checkFile = TRUE, check_keys = TRUE, verbose = TRUE)
+
+# page 17 manual:
+Plvit019_Full_vcf <- extract.gt(Plvit019_Full_vcf, element = "GT", mask = FALSE, as.numeric = FALSE,
+           return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+           convertNA = TRUE)
+
+class(Plvit019_Full_vcf)
+head(Plvit019_Full_vcf)
+
+# idem pour frequence: en 7eme colonne
+# non ne fonctionne pas
+#Create allele frequencies from matrices of allelic depths (AD) : en 6eme colonne
+
+# comme on ne peut importer la freq dans vcfR, peut etre peut on calculer la freq pour les 2 autres vcf.
+vcf_file2 <- system.file("/Users/Carole/Desktop/analyses_vcf/data/1612_wf1_calls_2.vcf", package = "pinfsc50")
+vgcall_1612.vcf <- read.vcfR("/Users/Carole/Desktop/analyses_vcf/data/1612_wf1_calls_2.vcf", limit = 1e+07, nrows = -1, skip = 0, cols = NULL,
+                               convertNA = TRUE, checkFile = TRUE, check_keys = TRUE, verbose = TRUE)
+
+vcf_file3 <- system.file("/Users/Carole/Desktop/analyses_vcf/data/sample1_pileup_019_2.vcf", package = "pinfsc50")
+varscan_1612.vcf <- read.vcfR("/Users/Carole/Desktop/analyses_vcf/data/sample1_pileup_019_2.vcf", limit = 1e+07, nrows = -1, skip = 0, cols = NULL,
+                              convertNA = TRUE, checkFile = TRUE, check_keys = TRUE, verbose = TRUE)
+
+varscan_GT<- extract.gt(varscan_1612.vcf, element = "GT", mask = FALSE, as.numeric = FALSE,
+           return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+           convertNA = TRUE)
+
+vgcall_GT<- extract.gt(vgcall_1612.vcf, element = "GT", mask = FALSE, as.numeric = FALSE,
+                       return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+                       convertNA = TRUE)
+
+# varscan a les matrices AD et RD a combiner.
+
+
+ad_varscan <- (extract.gt(varscan_1612.vcf, element = "AD",  mask = FALSE, as.numeric = FALSE,
+           return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+           convertNA = TRUE))
+
+rd_varscan <- (extract.gt(varscan_1612.vcf, element = "RD",  mask = FALSE, as.numeric = FALSE,
+                          return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+                          convertNA = TRUE))
+
+freq_varscan <- cbind(ad_varscan,rd_varscan)
+
+head(freq_varscan)
+
+#changer les noms des colonnes pour savoir qui est ad et rd
+colnames(freq_varscan) <- c("ad","rd")
+head(freq_varscan)
+
+#***************************160519*******************************************************
+
+#Construction du tableau ?? 8 colonnes (Pos et chrom communes, puis GT, freq alt (?? calculer, et Alt pour varscan et vgcall))
+# lignes 163 et 167 pour varscan ont le AD de ref et alt pour varsacn
+# il faut separer celles de vgcall qui sont en 1,2:
+
+temp_vgcall_AD <- extract.gt(vgcall_1612.vcf, element = "AD", mask = FALSE, as.numeric = FALSE,
+           return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+           convertNA = TRUE)
+temp_vgcall_AD[142,]
+
+vgcall_1612.vcf@gt[142,]
+
+? strsplit # pour help un seul ? et pas de parentheses.
+liste <- strsplit(temp_vgcall_AD,",") # par defaut mettre les param??tres dans l'ordre et du coup le sep qui s'apelle ici split, n'a pas besoin d'etre decrit, juste indiqu??.
+head(liste)
+
+ad_vgcall_ref <- sapply(liste,"[[", 1)
+head(ad_vgcall_ref) # ok
+ad_vgcall_alt <- sapply(liste,"[[", 2) # certains elements n'ont pas 2 chiffres.Error in FUN(X[[i]], ...) : subscript out of bounds
+
+which(lapply(liste, length) < 2)  # donne liste des lignes avec moins de 2 chiffres. on trouve 142.
+head(ad_vgcall_alt)
+# quand deletion on n'a pas de chiffrev pour alternatif.
+
+vgcall_1612.vcf@fix[665,]
+
+# pas de freq calculable. 
+# eliminer ces lignes avec un mask a re utiliser ensuite pour le tableau final.
+
+#Mais On a des NA dans le tableau compare: les eliminer!
+
+mask <- (which(lapply(liste, length) < 2) )
+length(liste[mask]) # 1 seul dimension, mask est un vecteur d'indice
+liste2 <- liste[-mask,] # on a enleve les indel de la table.
+
+mask2 <- lapply(liste, length) < 2 # booleen
+length(liste[mask2])
+liste2 <- liste[!mask,] # on a enlev?? les indel de la table. l'inverse ou le moins d'un booleen est le !
+
+mask3 <- lapply(liste, length) == 2 # booleen
+length(liste[mask3])
+liste3 <- liste[mask3] # on a enleve les indel de la table.
+length(liste3)
+
+ad_vgcall_alt <- sapply(liste3,"[[", 2) # certains elements n'ont pas 2 chiffres.Error in FUN(X[[i]], ...) : subscript out of bounds
+
+# appliquer le meme mask3 sur ad_vgcall_ref, pour avoir le meme nombre de lignes
+
+ad_vgcall_ref <- sapply(liste3,"[[", 1) # 
+head(ad_vgcall_ref) # ok
+
+length(ad_vgcall_ref) == length(ad_vgcall_alt)
+
+# transformer la liste en vecteur a chaine de caracteres par unlist:
+ad_vgcall_ref <- unlist(ad_vgcall_ref)
+ad_vgcall_alt <- unlist(ad_vgcall_alt)
+
+ad_vgcall_ref <- as.numeric(ad_vgcall_ref)
+ad_vgcall_alt <- as.numeric(ad_vgcall_alt)
+
+
+#############################################################################################################
+
+# filtrer sur la colonne PASS les PASS avec un mask:
+
+
+vgcall_1612.vcf@meta
+head(vgcall_1612.vcf@fix)
+
+#mask_Filter_pass <- lapply(vgcall_1612.vcf@fix , filter ) == "lowad")
+#filter(.data =vgcall_1612.vcf@fix, vgcall_1612.vcf@fix["FILTER"]=="PASS", .preserve = FALSE)
+
+?lapply
+
+
+
+#  solution 1
+mask_Filter_pass <- vgcall_1612.vcf@fix[,7] == "PASS"
+length(vgcall_1612.vcf@fix[mask_Filter_pass])
+vgcall_1612.vcf_filtPASS <- vgcall_1612.vcf@fix[mask_Filter_pass,] # on a enleve les indel de la table.
+length(vgcall_1612.vcf_filtPASS)
+head(vgcall_1612.vcf_filtPASS)
+tail(vgcall_1612.vcf_filtPASS)
+summary(vgcall_1612.vcf_filtPASS)
+
+# solution 2
+vgcall_1612_FP <- which(vgcall_1612.vcf@fix[,7] == "PASS")
+head(vgcall_1612_FP)
+summary(vgcall_1612_FP)
+class(vgcall_1612_FP)
+
+vgcall_1612_filt <- vgcall_1612.vcf@fix[vgcall_1612_FP,] # on a enleve les lowad de la table.
+head(vgcall_1612_filt)
+tail(vgcall_1612_filt)
+
+#de meme sur Varscan:
+varscan_1612_FP <- which(varscan_1612.vcf@fix[,7] == "PASS")
+head(varscan_1612_FP)
+varscan_1612_filt <- varscan_1612.vcf@fix[varscan_1612_FP,] # on a enleve les lowad de la table.
+
+head(varscan_1612_filt)
+tail(varscan_1612_filt)
+
+nrow(vgcall_1612_filt)
+nrow(varscan_1612_filt)
+
+#######creation des identifiants 
+?paste
+
+vgcall_ident <- paste(vgcall_1612_filt[,1],vgcall_1612_filt[,2], vgcall_1612_filt[,4], sep="_")
+head(vgcall_ident)
+class(vgcall_ident) # un vecteur
+
+varscan_ident <- paste(varscan_1612_filt[,1],varscan_1612_filt[,2], varscan_1612_filt[,4], sep="_")
+head(varscan_ident)
+
+#unique (enleve les duplicat) lenght(pour voir la longueur du vecteur)
+
+length(unique(vgcall_ident))
+length(unique(varscan_ident))
+
+length(unique(vgcall_ident)) == length(vgcall_ident)
+length(unique(varscan_ident)) == length(varscan_ident)
+
+##################### traiter le fichier vcf_1612 avec les 60 souches:
+
+Plvit019_Full_vcf <- read.vcfR("/Users/Carole/Desktop/analyses_vcf/data/Plvit019.vcf", limit = 1e+07, nrows = -1, skip = 0, cols = NULL,
+                               convertNA = TRUE, checkFile = TRUE, check_keys = TRUE, verbose = TRUE)
+
+head(Plvit019_Full_vcf)
+
+head(Plvit019_Full_vcf@gt)
+
+# recup depuis gt la colonne GT en ne gardant que ceux != 0/0 -> mask
+
+Plvit019_gt_vcf <- extract.gt(Plvit019_Full_vcf, element = "GT", mask = FALSE, as.numeric = FALSE,
+                                return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+                                convertNA = TRUE)
+
+mask_alt <- Plvit019_gt_vcf[,"PLVIT_1612-G1"] != "0/0" &  Plvit019_gt_vcf[,"PLVIT_1612-G1"] !=  "./."
+sum(mask_alt) # il cr???? des NA
+mask_alt <- ! Plvit019_gt_vcf[,"PLVIT_1612-G1"] %in% c("0/0", "./.") 
+sum(mask_alt) # il est bon meme avec des NA
+
+# on enleve les NA en plus:
+mask_alt <- ! is.na(Plvit019_gt_vcf[,"PLVIT_1612-G1"]) & ! Plvit019_gt_vcf[,"PLVIT_1612-G1"] %in% c("0/0", "./.")
+sum(mask_alt)
+
+
+class(Plvit019_gt_vcf)
+head(Plvit019_gt_vcf)
+
+
+Plvit019_Full_vcf_filt <- Plvit019_Full_vcf@fix[mask_alt,] # on a enleve les 0/0, ./., NA de la table en triant les lignes.
+
+head(Plvit019_Full_vcf_filt) # on a des NA
+dim(Plvit019_1612_vcf_filt)
+class(Plvit019_Full_vcf_filt)
+
+
+# sum(is.na(Plvit019_gt_vcf[,"PLVIT_1612-G1"])) # on a 3211 na
+
+#head(Plvit019_gt_vcf[is.na(Plvit019_gt_vcf[,"PLVIT_1612-G1"]),])
+
+#head(Plvit019_Full_vcf@fix[is.na(Plvit019_gt_vcf[,"PLVIT_1612-G1"]),])
+
+# voir comment le Varscan a genere des NA dans le Plvit019_Full_vcf
+
+
+#mask_alt_na <- ! is.na(Plvit019_gt_vcf[,"PLVIT_1612-G1"]) & Plvit019_gt_vcf[,"PLVIT_1612-G1"] != "0/0"
+
+#Plvit019_1612_vcf_filt <- Plvit019_Full_vcf@fix[mask_alt_na,]
+
+#dim(Plvit019_1612_vcf_filt)
+#head(Plvit019_1612_vcf_filt)
+#class(Plvit019_1612_vcf_filt)
+
+# passer en data frame pour n'utiliser que les $ pour aller chercher une colonne plutot que les crochets et ,
+Plvit019_1612_vcf_filt <- as.data.frame(Plvit019_1612_vcf_filt)
+
+table(Plvit019_1612_vcf_filt$FILTER) # on en a 8697, beaucoup plus que le 1830 depuis varscan sur 1612 seul
+
+# revoir les options de parametrage de Varscan. ils devraient etre les meme pour etre comparables, plutot que de faire en sorte de se rapporcher de vgcall.
+# ils le sont
+
+# rev??rifier les lignes non en communs avec les 1830 apr??s construction de la table avec les identifiants.
+
+# creation des identifiants 
+Plvit019_1612_ident <- paste(Plvit019_1612_vcf_filt[,1],Plvit019_1612_vcf_filt[,2], Plvit019_1612_vcf_filt[,4], sep="_")
+head(Plvit019_1612_ident)
+
+length(unique(Plvit019_1612_ident)) #unique (enleve les duplicat) lenght(pour voir la longueur du vecteur)
+
+length(unique(Plvit019_1612_ident)) == length(Plvit019_1612_ident)
+
+
+################################## couverture:
+
+Plvit019_DP_vcf <- extract.gt(Plvit019_Full_vcf, element = "DP", mask = FALSE, as.numeric = FALSE,
+                              return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+                              convertNA = TRUE)
+head(Plvit019_DP_vcf)
+# mask de filtre 0/0, ./. et NA:
+Plvit019_DP_vcf_filt <- Plvit019_DP_vcf[mask_alt,]
+dim(Plvit019_DP_vcf_filt)
+
+Ref_1612_DP <- Plvit019_DP_vcf_filt[,colnames(Plvit019_DP_vcf_filt) == "PLVIT_1612-G1"]
+class(Ref_1612_DP)
+head(Ref_1612_DP)
+dim(Ref_1612_DP) # null car vecteur
+
+
+Ref_DP <- data.frame(ID=Plvit019_1612_ident, refDP= as.numeric(Ref_1612_DP))
+dim(Ref_DP)
+head(Ref_DP)
+tail(Ref_DP)
+
+
+varscan_DP<- extract.gt(varscan_1612.vcf, element = "DP", mask = FALSE, as.numeric = FALSE,
+                        return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+                        convertNA = TRUE)
+
+vgcall_DP<- extract.gt(vgcall_1612.vcf, element = "DP", mask = FALSE, as.numeric = FALSE,
+                       return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+                       convertNA = TRUE)
+
+# ident : varscan_ident, vgcall_ident
+# mask : vgcall_1612_FP, varscan_1612_FP
+
+varscan_DP <- varscan_DP[varscan_1612_FP,] 
+dim(varscan_DP) # si matrice
+head(varscan_DP) #vecteur
+length(varscan_DP)
+
+vgcall_DP <- vgcall_DP[vgcall_1612_FP,]
+length(vgcall_DP)
+
+varscan_DP <- data.frame(ID=varscan_ident, VsDP= as.numeric(varscan_DP))
+vgcall_DP <- data.frame(ID=vgcall_ident, VGDP= as.numeric(vgcall_DP))
+
+?merge
+methode_DP <- merge(x = Ref_DP, y=varscan_DP, by="ID", all=TRUE)
+
+dim(methode_DP)
+
+head(methode_DP)
+
+methode_DP <- merge(x = methode_DP, y=vgcall_DP, by="ID", all=TRUE)
+head(methode_DP)
+dim(methode_DP)
+
+library(ggplot2)
+
+methode_DP$group <- "both" # recycle la valeur dans la colonne cr????e.
+
+methode_DP$group[is.na(methode_DP$refDP)] <- "1612_only"
+methode_DP$group[is.na(methode_DP$VsDP)] <- "ref_only"
+
+head(methode_DP)
+
+head(melt(methode_DP))
+
+nrow(melt(methode_DP))
+
+meltDP <- melt(methode_DP)
+
+ggplot(meltDP[meltDP$variable!="VGDP",],aes(x=log2(value+1))) + geom_density(aes(colour=group))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###################### venn  diagramme:
+library(Vennerable)
+
+?Venn
+
+liste <- list(vgcall=vgcall_ident, varscan=varscan_ident)
+head(liste)
+Venn(Sets=liste)
+plot(Venn(Sets=liste))
+
+# reste a comprendre pourquoi les snp communs sont 1253 au lieu de 413.
+
+###################### venn  diagramme 210519:
+library(Vennerable)
+
+?Venn
+
+liste <- list(vgcall=vgcall_ident, varscan=varscan_ident,ref_1612=Plvit019_1612_ident )
+head(liste)
+Venn(Sets=liste)
+plot(Venn(Sets=liste))
+
+# reste a comprendre pourquoi les snp communs sont 1253 au lieu de 413.
+
+################# 2) evaluer le nombre de position de positions homoz/h??t??roz et leur frequence all??lique.
+
+library(ggplot2)
+
+
+head(ad_vgcall_ref) 
+head(ad_vgcall_alt)
+head(freq_varscan)
+freq_vgcall <- cbind(ad_vgcall_alt,ad_vgcall_ref)
+head(freq_vgcall)
+Freq_varscan <- as.data.frame(freq_varscan)
+head(Freq_varscan)
+colnames(freq_vgcall) <- c("ad","rd")
+
+############################## calcul de freq allelic###############################
+vgcall_freq <- data.frame(REF=ad_vgcall_ref, ALT=ad_vgcall_alt)
+head(vgcall_freq)
+
+# creation du dataframe pour vgcall pour calculer ensuite la freq :
+
+vgcall_freq$freqvg <- apply(vgcall_freq, 1, function(x){
+  freq <- x[2]/(x[1]+x[2]) 
+  return(freq)
+})
+
+head(vgcall_freq)
+
+# creation du dataframe pour varscan pour calculer ensuite la freq :
+ad_varscan <- (extract.gt(varscan_1612.vcf, element = "AD",  mask = FALSE, as.numeric = FALSE,
+                          return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+                          convertNA = TRUE))
+
+rd_varscan <- (extract.gt(varscan_1612.vcf, element = "RD",  mask = FALSE, as.numeric = FALSE,
+                          return.alleles = FALSE, IDtoRowNames = TRUE, extract = TRUE,
+                          convertNA = TRUE))
+
+class(ad_varscan)
+class(rd_varscan)
+head(ad_varscan) # caracteres entre ""
+ad_varscan <- as.numeric(ad_varscan[,1])
+rd_varscan <- as.numeric(rd_varscan[,1]) # ad = ALT
+
+Varscan_freq <- data.frame(REF=rd_varscan, ALT=ad_varscan)
+head(Varscan_freq)
+tail(Varscan_freq)
+class(Varscan_freq)
+
+Varscan_freq$freqVs <- apply(Varscan_freq, 1, function(x){
+  freq <- x[2]/(x[1]+x[2]) 
+  return(freq)
+})
+head(Varscan_freq)
+# il y a trop de zero dans les freq calcul??e. Refiltrer
+
+head(varscan_1612.vcf@meta)
+head(varscan_1612.vcf@fix)
+head(varscan_1612.vcf@gt)
+
+
+varscan_freq_filt <- Varscan_freq[varscan_1612_FP,]
+head(varscan_freq_filt)
+nrow(Varscan_freq)
+nrow(varscan_freq_filt)
+
+head(vgcall_freq)
+vgcall_freq_filt <- vgcall_freq[vgcall_1612_FP,]
+head(vgcall_freq_filt)
+nrow(vgcall_freq)
+nrow(vgcall_freq_filt) # [1] 5396 ok parfait.
+class(vgcall_freq_filt)
+
+# attribuer les identifiants aux lignes vgcall_ident
+?row.names()
+row.names(vgcall_freq_filt) <- vgcall_ident
+head(vgcall_freq_filt)
+
+# cr??er une colonne dans data.frame:
+vgcall_freq_filt$id <- vgcall_ident
+head(vgcall_freq_filt)
+
+varscan_freq_filt$id <- varscan_ident
+head(varscan_freq_filt)
+
+# combiner les 2 data.frame en 1:
+head(varscan_freq_filt[,-c(1,2)]) # ne garder que la colonne freq et l'identifiant avce le -c des 2 premieres colonnes.
+compar_freq <- merge(varscan_freq_filt[,-c(1,2)],vgcall_freq_filt[,-c(1,2)], by.x= "id", all = T) # on cr???? un vecteur qui contient les indices des 2 colonnes ?? enlever.
+compar_freq <- merge(varscan_freq_filt[,-c(1,2)],vgcall_freq_filt[,-c(1,2)], by= "id", all = T) # on cr???? un vecteur qui contient les indices des 2 colonnes ?? enlever.
+
+# garder tout, y compris les freq de ceux qui sont que dans un des 2fichiers: all=TRUE
+
+head(compar_freq)
+
+
+e <- ggplot(compar_freq, aes(x=freqVs, y=freqvg)) # acetique colonnes a regarder
+e + geom_point() + geom_abline(intercept = 0, slope = 1) + labs(x="freqvg black/ fresVs red", title = "Frequencies Varscan versus VG")
+
+ggplot(compar_freq, aes(x=freqvg)) + geom_density() + geom_density(aes(x=freqVs), color="red") + labs(x="freqvg black/ fresVs red", title = "Frequencies Densities", subtitle = "VG versus Varscan")
+   
+############################# vcfR sequencing depth information per site
+
+#Creating chromR objects
+
+#Genomic reference sequence files are typically in FASTA format files. These can be read in using the package ape.
+dna <- ape::read.dna("/Users/Carole/Desktop/analyses_vcf/data/plasmopara_viticola_INRA-PV221.assembly.PBv1.fasta", format = "fasta")
+str(dna)
+
+class(dna) # [1] "DNAbin"
+#dna <- dna$Plvit019
+#head(dna$Plvit019)
+
+class(dna[names(dna)== "Plvit019"]) # mask depuis les noms de la liste : ok dnabin
+
+dna <- dna[names(dna)== "Plvit019"]
+
+
+# (base) BAVO-PSAVE111:~ Carole$ rsync -ruptlv -e ssh ccouture@genossh.genouest.org:/groups/mildiou/work/VG/workflow2_segmented/scaffold_fasta/Plvit019 Desktop/analyses_vcf/data/
+# recuperation du scaffold Plvit019
+#dna <- ape::read.dna("/Users/Carole/Desktop/analyses_vcf/data/Plvit019", format = "fasta")
+
+#Annotation files (we currently support GFF), files which contain coordinates for annotations such as start and end points of genes, are tabular and can be read in with typical R functions.
+gff <- read.table("/Users/Carole/Desktop/analyses_vcf/data/plasmopara_viticola_INRA-PV221.geneAnnotation.v1.gff3", sep="\t", quote="")
+
+head(gff)
+class(gff)
+
+# garder seulement les lignes de Plvit019:
+# gff_19 <- gff["Plvit019",]
+# recherche dans google: "R package function et ce qu'on cherche ?? faire"ape read dna choose chromosome
+gff_19 <- gff[gff$V1 =="Plvit019",]
+
+head(gff_19)
+#Once the data are in memory we can use it to create a chromR object with the function create.chromR(). 
+#The create.chromR() function creates a new chromR object and populates it with data you provided it.
+
+chrom_vgcall_1612 <- create.chromR(name='Supercontig', vcf=vgcall_1612.vcf, seq=dna, ann=gff_19)
+
+## Warning in create.chromR(name = "Supercontig", vcf = vcf, seq = dna, ann = gff): 
+##         Names in variant data and sequence data do not match perfectly.
+##         If you choose to proceed, we'll do our best to match the data.
+##         But prepare yourself for unexpected results.
+#Once the chromR object has been created a few processing steps are needed. 
+#First, quick look at data with the plot function.
+head(vgcall_1612.vcf)
+plot(chrom_vgcall_1612)
+
+chrom_vgcall_1612 <- masker(chrom_vgcall_1612, min_QUAL = 1, min_DP = 10, max_DP = 50, min_MQ = 59.9,  max_MQ = 60.1)
+plot(chrom_vgcall_1612)
+chrom_vgcall_1612 <- proc.chromR(chrom_vgcall_1612, verbose=TRUE)
+plot(chrom_vgcall_1612)
+
+##Visualizing data
+#At this point we???ve input three types of data (variant, sequence and annotation), inserted them into a chromR object,
+#masked variants we feel were not of high quality and processed some summaries of these data.
+#We can now move on to visualizing these data.
+#The function chromoqc() uses the R function layout() to make composite plots of the data.
+#These plots can include barplots as well as scatterplots which have chromosomal coordinates.
+
+chromoqc(chrom_vgcall_1612, dp.alpha=20)
+
+##################idem pour Varscan
+
+#Once the data are in memory we can use it to create a chromR object with the function create.chromR(). 
+#The create.chromR() function creates a new chromR object and populates it with data you provided it.
+head(varscan_1612.vcf)
+chrom_varscan_1612 <- create.chromR(name='Supercontig', vcf=varscan_1612.vcf, seq=dna, ann=gff_19)
+
+## Warning in create.chromR(name = "Supercontig", vcf = vcf, seq = dna, ann = gff): 
+##         Names in variant data and sequence data do not match perfectly.
+##         If you choose to proceed, we'll do our best to match the data.
+##         But prepare yourself for unexpected results.
+#Once the chromR object has been created a few processing steps are needed. 
+#First, quick look at data with the plot function.
+
+plot(chrom_varscan_1612)
+
+chrom_varscan_1612 <- masker(chrom_varscan_1612, min_QUAL = 1, min_DP = 10, max_DP = 500, min_MQ = 59.9,  max_MQ = 60.1)
+plot(chrom_varscan_1612)
+chrom_varscan_1612 <- proc.chromR(chrom_varscan_1612, verbose=TRUE)
+plot(chrom_varscan_1612)
+
+##Visualizing data
+#At this point we???ve input three types of data (variant, sequence and annotation), inserted them into a chromR object,
+#masked variants we feel were not of high quality and processed some summaries of these data.
+#We can now move on to visualizing these data.
+#The function chromoqc() uses the R function layout() to make composite plots of the data.
+#These plots can include barplots as well as scatterplots which have chromosomal coordinates.
+
+chromoqc(chrom_varscan_1612, dp.alpha=20)
+
+
+############################################ barplot pour les 60 souches pour les genotypes avec ggplot2
+
+head(Plvit019_Full_vcf)
+
+
+
+Plvit019_1612_ident 
+vgcall_ident
+varscan_ident
+
+Plvit019_1612_ident[!Plvit019_1612_ident%in%c(vgcall_ident,varscan_ident)]
+
+
+sessionInfo()
+#R version 3.5.2 (2018-12-20)
+#Platform: x86_64-apple-darwin15.6.0 (64-bit)
+#Running under: macOS Mojave 10.14.5
+
+#Matrix products: default
+#BLAS: /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib
+#LAPACK: /Library/Frameworks/R.framework/Versions/3.5/Resources/lib/libRlapack.dylib
+
+#locale:
+#  [1] C
+
+#attached base packages:
+#  [1] grid      parallel  stats     graphics  grDevices utils     datasets  methods   base     
+
+#other attached packages:
+#  [1] Vennerable_3.0      xtable_1.8-4        gtools_3.8.1        reshape_0.8.8      
+#[5] RColorBrewer_1.1-2  lattice_0.20-38     RBGL_1.58.2         graph_1.60.0       
+#[9] BiocGenerics_0.28.0 forcats_0.4.0       stringr_1.4.0       purrr_0.3.2        
+#[13] readr_1.3.1         tidyr_0.8.3         tibble_2.1.1        ggplot2_3.1.1      
+#[17] tidyverse_1.2.1     dplyr_0.8.1         vcfR_1.8.0         
+
+#loaded via a namespace (and not attached):
+#  [1] Rcpp_1.0.1        lubridate_1.7.4   ape_5.3           zeallot_0.1.0     utf8_1.1.4       
+#[6] assertthat_0.2.1  digest_0.6.18     R6_2.4.0          cellranger_1.1.0  plyr_1.8.4       
+#[11] backports_1.1.4   stats4_3.5.2      httr_1.4.0        pillar_1.4.0      rlang_0.3.4      
+#[16] lazyeval_0.2.2    readxl_1.3.1      rstudioapi_0.10   vegan_2.5-5       Matrix_1.2-17    
+#[21] labeling_0.3      splines_3.5.2     pinfsc50_1.1.0    munsell_0.5.0     broom_0.5.2      
+#[26] compiler_3.5.2    modelr_0.1.4      pkgconfig_2.0.2   mgcv_1.8-28       tidyselect_0.2.5 
+#[31] fansi_0.4.0       permute_0.9-5     viridisLite_0.3.0 memuse_4.0-0      crayon_1.3.4     
+#[36] withr_2.1.2       MASS_7.3-51.4     nlme_3.1-140      jsonlite_1.6      gtable_0.3.0     
+#[41] magrittr_1.5      scales_1.0.0      cli_1.1.0         stringi_1.4.3     xml2_1.2.0       
+#[46] vctrs_0.1.0       generics_0.0.2    tools_3.5.2       glue_1.3.1        hms_0.4.2        
+#[51] yaml_2.2.0        colorspace_1.4-1  cluster_2.0.9     rvest_0.3.4       haven_2.1.0  
