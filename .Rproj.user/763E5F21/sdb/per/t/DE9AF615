@@ -1,0 +1,21 @@
+{
+    "collab_server" : "",
+    "contents" : "# Analyses vcf\n\n# definition des repertoires de travail\nmaindir <- \"/Users/Carole/Desktop/analyses_vcf\" # / puis tab ou tild/Desktop\ndatadir <- file.path(maindir, \"data\")\nresultdir <- file.path(maindir, \"results\")\n\n",
+    "created" : 1557743165696.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "2024033072",
+    "id" : "DE9AF615",
+    "lastKnownWriteTime" : 1557743508,
+    "last_content_update" : 1557743508116,
+    "path" : "~/Desktop/analyses_vcf/scripts/analyses_vcf.R",
+    "project_path" : null,
+    "properties" : {
+        "tempName" : "Untitled1"
+    },
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}
